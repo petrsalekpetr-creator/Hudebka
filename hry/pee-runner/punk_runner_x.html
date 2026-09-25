@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Punk Runner 3D - Ultimate Edition</title>
+<style>
+  :root{ box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); }
+  html,body{ height:100%; margin:0; overflow:hidden; background:#000; font-family:'Segoe UI',Arial,sans-serif; touch-action:none; -webkit-user-select:none; user-select:none; }
+  #wrap{position:relative; width:100%; height:100%;}
+  canvas{display:block; width:100%; height:100%;}
+  #hud{ position:absolute; top:calc(14px + env(safe-area-inset-top,0px)); left:0; right:0; display:flex; justify-content:space-between; padding:0 18px; color:#fff; font-weight:700; font-size:20px; text-shadow:0 2px 4px rgba(0,0,0,.6); pointer-events:none; }
+  #overlay{ position:absolute; inset:0; background:rgba(10,10,20,.88); color:#fff; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px; gap:14px; }
+  #overlay h1{margin:0; font-size:32px; color:#39ff6a; letter-spacing:1px;}
+  #overlay p{margin:0; font-size:16px; opacity:.85; max-width:320px; line-height:1.4;}
+  #startBtn{ margin-top:8px; padding:14px 34px; font-size:18px; font-weight:800; border:none; border-radius:30px; background:linear-gradient(135deg,#39ff6a,#1fbf50); color:#0a0a0a; cursor:pointer; box-shadow:0 6px 0 #0d7a2c; }
+  #startBtn:active{transform:translateY(4px); box-shadow:0 2px 0 #0d7a2c;}
+  .hidden{display:none !important;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="hud">
+    <div>SKORE: <span id="score">0</span></div>
+    <div>MINCE <span id="coins">0</span></div>
+    <div>LAHVAC <span id="bottles">0</span></div>
+    <div>BEST: <span id="best">0</span></div>
+  </div>
+  <div id="overlay">
+    <h1 id="title">PUNK RUNNER 3D</h1>
+    <p id="msg">Uhybej policejnim autum! Svihni prstem doleva/doprava pro zmenu pruhu, nahoru pro skok. Pocitac: sipky / mezernik.</p>
+    <button id="startBtn">HRAT</button>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  const canvas = document.getElementById('c');
+  const overlay = document.getElementById('overlay');
+  const title = document.getElementById('title');
+  const msg = document.getElementById('msg');
+  const startBtn = document.getElementById('startBtn');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const coinsEl = document.getElementById('coins');
+  const bottlesEl = document.getElementById('bottles');
+
+  let W,H;
+  let scene, camera, renderer;
+  const laneX = [-2.3, 0, 2.3];
+  
+  // PCR1 CAR MATERIALS AND GLOBALS
+  const std=(c,r,m,o={})=>new THREE.MeshStandardMaterial(Object.assign({color:c,roughness:r,metalness:m},o));
+  const M={
+    white:std(0xd8dde1,.28,.35),
+    dark:std(0x14181d,.5,.15),
+    black:std(0x08090a,.7,0),
+    glass:std(0x0d1822,.08,.35),
+    chrome:std(0xc4cbcf,.18,.9),
+    red:std(0xc0161b,.25,.15,{emissive:0x400000}),
+    lamp:std(0xffffff,.08,.1,{emissive:0x7fbfff,emissiveIntensity:.5}),
+    beaconL:std(0x1260ff,.15,.1,{emissive:0x004cff,emissiveIntensity:2}),
+    beaconR:std(0x1260ff,.15,.1,{emissive:0x004cff,emissiveIntensity:2}),
+    rim:std(0xc9ced2,.3,.7)
+  };
+  const BLUE='#0a4bbd',YEL='#ffd81a',INK='#0a3f9e';
+  const BL='#1668c8',LM='#d6f21c',AX=[-1.46,1.226];
+
+  // RADY3 PLAYER GLOBALS
+  let playerGroup, root, pelvis, torso, headGrp, spikes = [], stripes = [];
+  let legs = [], arms = [];
+  const L1 = 0.40, L2 = 0.40, ANK = 0.075;
+  let phase = 0, T = 0;
+  let dashes = [];
+
+  let best = 0;
+  try{ best = parseInt(localStorage.getItem('punkRunnerBest3D')||'0',10) || 0; }catch(e){}
+  bestEl.textContent = best;
+
+  function resize(){
+    W = window.innerWidth; H = window.innerHeight;
+    if(renderer){ renderer.setSize(W,H); camera.aspect = W/H; camera.updateProjectionMatrix(); }
+  }
+
+  // --- PCR1 CAR BUILDER HELPERS ---
+  function box(w,h,d,mat,x=0,y=0,z=0,rx=0,ry=0,rz=0){
+    const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+    o.position.set(x,y,z);o.rotation.set(rx,ry,rz);return o;
+  }
+  function tex(w,h,draw){
+    const c=document.createElement('canvas');c.width=w;c.height=h;
+    draw(c.getContext('2d'));
+    const t=new THREE.CanvasTexture(c);
+    t.encoding=THREE.sRGBEncoding;
+    t.anisotropy=renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w,h,t,lit=true){
+    const Mat=lit?THREE.MeshStandardMaterial:THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w,h),
+      new Mat({map:t,transparent:true,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));
+  }
+  function spaced(x,str,cx,cy,sp){
+    const ws=[...str].map(ch=>x.measureText(ch).width);
+    let px=cx-(ws.reduce((a,b)=>a+b,0)+sp*(str.length-1))/2;
+    [...str].forEach((ch,i)=>{x.fillText(ch,px,cy);px+=ws[i]+sp;});
+  }
+  function bodyProfile(){
+    const s=new THREE.Shape();
+    s.moveTo(-2.28,.24);
+    [[-2.33,.42],[-2.31,.70],[-2.20,.80],[-1.05,.93],[1.30,.99],[2.05,1.01],[2.29,.98],[2.33,.62],[2.27,.26]]
+      .forEach(p=>s.lineTo(p[0],p[1]));
+    return s;
+  }
+  function wheel(x,z){
+    const w=new THREE.Group(),s=Math.sign(z);
+    const cyl=(r,h,m)=>{const o=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,32),m);o.rotation.x=Math.PI/2;return o;};
+    w.add(cyl(.33,.21,M.black),cyl(.235,.215,M.rim),cyl(.05,.23,M.chrome));
+    for(let a=0;a<5;a++) w.add(box(.022,.46,.008,M.dark,0,0,s*.109,0,0,a*Math.PI/5+.3));
+    w.position.set(x,.33,z);
+    return w;
+  }
+
+  function createPoliceCarTemplate(){
+    const g=new THREE.Group(),add=(...o)=>o.forEach(m=>g.add(m));
+
+    const bg=new THREE.ExtrudeGeometry(bodyProfile(),{depth:1.75,bevelEnabled:true,bevelSegments:3,steps:1,bevelSize:.045,bevelThickness:.035});
+    bg.translate(0,0,-.875);
+    add(new THREE.Mesh(bg,M.white));
+    add(box(4.4,.2,1.5,M.black,-.05,.17,0),box(1.8,.08,1.84,M.black,-.1,.30,0));
+
+    const gs=new THREE.Shape();
+    gs.moveTo(-.95,.93);gs.lineTo(-.10,1.42);gs.lineTo(.95,1.45);gs.lineTo(1.65,1.02);
+    const gg=new THREE.ExtrudeGeometry(gs,{depth:1.56,bevelEnabled:false});
+    gg.translate(0,0,-.78);
+    add(new THREE.Mesh(gg,M.glass),box(1.10,.05,1.58,M.white,.42,1.44,0));
+    for(const z of [-.79,.79]){
+      add(box(.06,.98,.07,M.black,-.525,1.18,z,0,0,-1.06),   
+          box(.08,.50,.07,M.black,.12,1.18,z),                
+          box(.16,.82,.07,M.white,1.30,1.235,z,0,0,1.02));    
+    }
+    for(const z of [-1.0,1.0]) add(box(.13,.09,.17,M.white,-.78,.99,z),box(.05,.04,.09,M.black,-.80,.96,z*.93));
+
+    const PX=400;
+    const mk=flip=>tex(1720,312,x=>{
+      const X=v=>(flip?2.15-v:v+2.15)*PX,Y=v=>(1.02-v)*PX;
+      const poly=(c,p)=>{x.fillStyle=c;x.beginPath();p.forEach((q,i)=>x[i?'lineTo':'moveTo'](X(q[0]),Y(q[1])));x.closePath();x.fill();};
+      x.fillStyle='#06080a';
+      AX.forEach(a=>{x.beginPath();x.arc(X(a),Y(.33),.41*PX,0,7);x.fill();});
+      poly(BL,[[-.98,.925],[2.10,.925],[2.10,.805],[-.98,.805]]);
+      [-1.55,-1.44,-1.33,-1.22,-1.11].forEach((v,i)=>poly(i%2?BL:LM,[[v,.85],[v+.10,.85],[v+.10,.76],[v,.76]]));
+      const stripe=(b,c)=>poly(c,[[b,.26],[b+.07,.26],[b+.27,.80],[b+.20,.80]]);
+      [[-1.02,BL],[-.95,LM],[-.88,BL],[.45,BL],[.52,LM],[.59,BL]].forEach(s=>stripe(s[0],s[1]));
+      x.strokeStyle='rgba(0,0,0,.4)';x.lineWidth=3;
+      [-.85,.12,1.02].forEach(v=>{x.beginPath();x.moveTo(X(v),Y(.80));x.lineTo(X(v),Y(.30));x.stroke();});
+      x.fillStyle='#aab0b5';
+      [-.12,.86].forEach(v=>x.fillRect(X(flip?v+.14:v),Y(.775),.14*PX,.035*PX));
+      x.textBaseline='middle';x.textAlign='left';
+      x.fillStyle='#fff';x.font='bold 28px Arial';spaced(x,'POMÁHAT A CHRÁNIT',X(-.38),Y(.865),2);
+      x.font='bold 36px Arial';x.fillText('158',X(1.93)-(flip?0:0)-30,Y(.865));
+      x.strokeStyle='#fff';x.lineWidth=4;x.beginPath();x.arc(X(1.78),Y(.865),17,0,7);x.stroke();
+      x.fillStyle='#111';x.font='bold 52px Arial';spaced(x,'POLICIE',X(-.30),Y(.56),6);
+    });
+    const sR=decal(4.3,.78,mk(false));sR.position.set(0,.63,.9115);
+    const sL=decal(4.3,.78,mk(true));sL.position.set(0,.63,-.9115);sL.rotation.y=Math.PI;
+    add(sR,sL);
+
+    add(box(.06,.10,1.30,M.black,-2.35,.36,0));
+    add(box(.05,.24,.64,M.black,-2.36,.60,0));
+    for(let i=-3;i<=3;i++) add(box(.055,.20,.015,M.chrome,-2.375,.60,i*.085));
+    add(box(.05,.03,.70,M.chrome,-2.35,.72,0));
+    for(const z of [-.66,.66]){
+      const ry=z>0?-.30:.30;
+      add(box(.06,.11,.50,M.lamp,-2.285,.75,z,0,ry,0));
+      add(box(.03,.025,.30,z<0?M.beaconL:M.beaconR,-2.318,.70,z,0,ry,0));
+      add(box(.04,.06,.18,M.lamp,-2.385,.36,z*.93));
+    }
+    const pt=tex(256,56,x=>{
+      x.fillStyle='#f3f3ee';x.fillRect(0,0,256,56);
+      x.fillStyle='#1747a8';x.fillRect(0,0,26,56);
+      x.fillStyle='#fff';x.font='bold 14px Arial';x.textAlign='center';x.fillText('CZ',13,50);
+      x.fillStyle='#111';x.font='bold 40px Arial';x.textBaseline='middle';x.fillText('1A1 0158',148,30);
+    });
+    const pF=decal(.52,.114,pt,false);pF.position.set(-2.39,.40,0);pF.rotation.y=-Math.PI/2;
+    const pB=decal(.52,.114,pt,false);pB.position.set(2.375,.42,0);pB.rotation.y=Math.PI/2;
+    add(pF,pB);
+
+    for(const z of [-.62,.62]) add(box(.05,.12,.42,M.red,2.365,.88,z));
+    add(box(.04,.26,1.66,M.dark,2.35,.40,0));
+    const rt=tex(350,110,x=>{
+      x.font='bold 52px Arial';x.textBaseline='middle';x.textAlign='left';x.fillStyle='#111';
+      spaced(x,'POLICIE',175,55,5);
+    });
+    const rd=decal(.70,.22,rt);rd.position.set(2.37,.72,0);rd.rotation.y=Math.PI/2;add(rd);
+
+    const ht=tex(512,256,x=>{
+      x.strokeStyle='#5a6066';x.lineWidth=5;x.beginPath();x.arc(256,66,40,0,7);x.stroke();
+      x.lineWidth=3;
+      for(let a=0;a<8;a++){x.beginPath();x.moveTo(256,66);x.lineTo(256+34*Math.cos(a*Math.PI/4),66+34*Math.sin(a*Math.PI/4));x.stroke();}
+      x.font='bold 84px Arial';x.textBaseline='middle';x.textAlign='left';x.fillStyle='#2a2e33';
+      spaced(x,'POLICIE',256,190,8);
+    });
+    const hood=new THREE.Group();
+    const hm=decal(.95,.475,ht);hm.rotation.x=-Math.PI/2;hm.rotation.z=-Math.PI/2;
+    hood.add(hm);hood.position.set(-1.62,.915,0);hood.rotation.z=.113;add(hood);
+
+    AX.forEach(x=>[-.85,.85].forEach(z=>add(wheel(x,z))));
+
+    const bar=new THREE.Group();
+    bar.add(box(.30,.06,1.22,M.rim),
+      box(.26,.09,.44,M.beaconL,0,.075,-.36),
+      box(.26,.09,.44,M.beaconR,0,.075,.36),
+      box(.26,.08,.28,M.lamp,0,.07,0));
+    bar.position.set(.30,1.495,0);
+    add(bar);
+
+    add(box(.02,.34,.02,M.black,.85,1.635,-.5,0,0,-.10));
+
+    g.position.y=.02;
+    // Úprava velikosti a natočení vozu pro hru (jede v ose Z)
+    g.scale.set(0.75, 0.75, 0.75); 
+    g.rotation.y = Math.PI / 2; // otočí předek do osy Z
+    return g;
+  }
+
+  let cachedPoliceCar;
+  function getPoliceCar(){
+    if(!cachedPoliceCar) cachedPoliceCar = createPoliceCarTemplate();
+    return cachedPoliceCar.clone();
+  }
+
+  // --- RADY3 PLAYER BUILDER HELPERS ---
+  const wrap = x => Math.atan2(Math.sin(x), Math.cos(x));
+  const bump = (x, c, w) => Math.exp(-Math.pow(wrap(x - c) / w, 2));
+
+  function legPose(p) {
+    const f = 0.15 + 0.45 * Math.sin(p);
+    const k = 0.3 + 0.3 * bump(p, Math.PI - 0.2, 0.7) + 1.25 * bump(p, -0.35, 0.95);
+    const w = 0.6 * bump(p, -1.0, 1.0) - 0.15 * bump(p, 1.4, 0.5);
+    return { f, k, a: w + f - k, w };
+  }
+  function footInfo(p) {
+    const { f, k, w } = legPose(p), s = f - k;
+    const ky = -L1 * Math.cos(f), kz = L1 * Math.sin(f);
+    const ay = ky - L2 * Math.cos(s), az = kz + L2 * Math.sin(s);
+    const fy = -Math.sin(w), fz = Math.cos(w), dy = -Math.cos(w), dz = -Math.sin(w);
+    const heel = ay - 0.09 * fy + ANK * dy, toe = ay + 0.2 * fy + ANK * dy;
+    return { low: Math.min(heel, toe), z: az };
+  }
+
+  function checkerTexture() {
+    const c = document.createElement('canvas'); c.width = 8; c.height = 8;
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#111'; cx.fillRect(0, 0, 8, 8);
+    cx.fillStyle = '#d81f2a'; cx.fillRect(0, 0, 4, 4); cx.fillRect(4, 4, 4, 4);
+    const t = new THREE.CanvasTexture(c);
+    t.magFilter = THREE.NearestFilter; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 2);
+    return t;
+  }
+  function tube(r0, r1, len, mat, seg = 14) {
+    const g = new THREE.CylinderGeometry(r0, r1, len, seg); g.translate(0, -len / 2, 0);
+    return new THREE.Mesh(g, mat);
+  }
+  function ball(r, mat, x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), mat);
+    m.position.set(x, y, z); m.scale.set(sx, sy, sz); return m;
+  }
+
+  function buildPlayer() {
+    playerGroup = new THREE.Group();
+    root = new THREE.Group();
+    // Originální character byl menší, zvětšíme ho aby odpovídal původní hře
+    root.scale.set(1.5, 1.5, 1.5);
+    playerGroup.add(root);
+    
+    // Otočení postavy zády ke kameře
+    root.rotation.y = Math.PI;
+
+    spikes = []; legs = []; arms = [];
+
+    const pants = new THREE.MeshLambertMaterial({ map: checkerTexture() });
+    const skin = new THREE.MeshLambertMaterial({ color: 0xe8b998 });
+    const jacket = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.35, metalness: 0.2, side: THREE.DoubleSide });
+    const tee = new THREE.MeshLambertMaterial({ color: 0x0e0e0e, side: THREE.DoubleSide });
+    const beard = new THREE.MeshLambertMaterial({ color: 0x6b4a2b });
+    const boot = new THREE.MeshLambertMaterial({ color: 0x0a0a0a });
+    const sole = new THREE.MeshLambertMaterial({ color: 0x050505 });
+    const metal = new THREE.MeshStandardMaterial({ color: 0xc8ccd4, roughness: 0.3, metalness: 0.9 });
+    const green = new THREE.MeshLambertMaterial({ color: 0x39ff6a });
+    const dark = new THREE.MeshBasicMaterial({ color: 0x0b0b0b });
+
+    pelvis = new THREE.Group(); root.add(pelvis);
+    pelvis.add(ball(0.2, pants, 0, 0.02, 0, 1.05, 0.75, 0.85));
+
+    [-1, 1].forEach(side => {
+      const hip = new THREE.Group(); hip.position.set(side * 0.1, 0, 0);
+      hip.add(ball(0.125, pants));
+      hip.add(tube(0.125, 0.088, L1, pants));
+      const knee = new THREE.Group(); knee.position.y = -L1; hip.add(knee);
+      knee.add(ball(0.088, pants));
+      const calf = tube(0.088, 0.066, L2, pants); knee.add(calf);
+      const shaft = tube(0.078, 0.078, 0.14, boot); shaft.position.y = -L2 + 0.13; knee.add(shaft);
+      const ankle = new THREE.Group(); ankle.position.y = -L2; knee.add(ankle);
+      const upper = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.09, 0.26), boot); upper.position.set(0, -0.03, 0.06); ankle.add(upper);
+      ankle.add(ball(0.07, boot, 0, -0.03, 0.19, 1, 0.75, 1.1));
+      const sl = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.035, 0.31), sole); sl.position.set(0, -0.06, 0.07); ankle.add(sl);
+      pelvis.add(hip);
+      legs.push({ hip, knee, ankle, side });
+    });
+
+    torso = new THREE.Group(); torso.position.y = 0.06; pelvis.add(torso);
+    const prof = [[0.001,0],[0.2,0],[0.235,0.1],[0.25,0.22],[0.29,0.38],[0.31,0.48],[0.26,0.57],[0.13,0.62],[0.001,0.63]]
+      .map(p => new THREE.Vector2(p[0], p[1]));
+    const body = new THREE.Mesh(new THREE.LatheGeometry(prof, 20, 0.5, Math.PI * 2 - 1.0), jacket);
+    body.scale.set(1, 1, 0.68); torso.add(body);
+    const inner = new THREE.Mesh(new THREE.LatheGeometry(prof.map(p => new THREE.Vector2(p.x * 0.96, p.y)), 20), tee);
+    inner.scale.set(1, 1, 0.68); torso.add(inner);
+    
+    [-1, 1].forEach(sd => {
+      const lap = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.02), jacket);
+      lap.position.set(sd * 0.155, 0.47, 0.17); lap.rotation.set(-0.1, -sd * 0.35, sd * 0.3); torso.add(lap);
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+        const x = sd * (0.16 + i * 0.05), y = 0.3 + j * 0.05;
+        const z = 0.68 * Math.sqrt(Math.max(0.0001, 0.3 * 0.3 - x * x)) + 0.004;
+        const st = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.025, 4), metal);
+        st.position.set(x, y, z); st.rotation.set(Math.PI / 2, 0, Math.PI / 4); torso.add(st);
+      }
+    });
+    const zip = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.3, 0.012), metal); zip.position.set(0.17, 0.2, 0.2); zip.rotation.z = -0.25; torso.add(zip);
+    const neck = tube(0.075, 0.085, 0.2, skin, 12); neck.position.y = 0.72; torso.add(neck);
+    const choker = new THREE.Mesh(new THREE.TorusGeometry(0.088, 0.02, 8, 20), jacket); choker.rotation.x = Math.PI / 2; choker.position.y = 0.65; torso.add(choker);
+    for (let i = 0; i < 12; i++) {
+      const an = i / 12 * Math.PI * 2, sp = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.04, 5), metal);
+      sp.position.set(Math.sin(an) * 0.105, 0.65, Math.cos(an) * 0.105); sp.rotation.set(Math.cos(an) * Math.PI / 2, 0, -Math.sin(an) * Math.PI / 2); torso.add(sp);
+    }
+
+    [-1, 1].forEach(side => {
+      const sh = new THREE.Group(); sh.position.set(side * 0.32, 0.5, 0); torso.add(sh);
+      sh.add(ball(0.095, jacket));
+      sh.add(tube(0.088, 0.066, 0.29, jacket));
+      const sp = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.11, 8), metal);
+      sp.position.set(side * 0.05, 0.1, 0); sp.rotation.z = -side * 0.8; sh.add(sp);
+      const el = new THREE.Group(); el.position.y = -0.29; sh.add(el);
+      el.add(ball(0.066, jacket));
+      el.add(tube(0.066, 0.052, 0.25, jacket, 10));
+      const band = tube(0.058, 0.058, 0.035, dark, 10); band.position.y = -0.235; el.add(band);
+      for (let i = 0; i < 7; i++) { const an = i / 7 * 6.283, st = ball(0.011, metal, Math.sin(an) * 0.06, -0.25, Math.cos(an) * 0.06); el.add(st); }
+      el.add(ball(0.06, skin, 0, -0.3, 0, 1, 1.1, 1));
+      arms.push({ sh, el, side });
+    });
+
+    headGrp = new THREE.Group(); headGrp.position.y = 0.7; torso.add(headGrp);
+    headGrp.add(ball(0.2, skin, 0, 0.15, 0.01, 0.92, 1.08, 1));
+    headGrp.add(ball(0.13, skin, 0, 0.05, 0.07, 0.95, 0.9, 1));
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.07, 8), skin); nose.rotation.x = Math.PI / 2 - 0.2; nose.position.set(0, 0.12, 0.22); headGrp.add(nose);
+    headGrp.add(ball(0.045, beard, 0, -0.03, 0.15, 0.9, 1.5, 0.8));
+    [-1, 1].forEach(sd => {
+      headGrp.add(ball(0.04, skin, sd * 0.18, 0.15, 0, 0.5, 1, 0.9));
+      headGrp.add(ball(0.018, dark, sd * 0.075, 0.18, 0.192, 1.2, 0.8, 0.6));
+      const br = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.014, 0.02), beard); br.position.set(sd * 0.075, 0.225, 0.19); br.rotation.set(0, -sd * 0.12, sd * 0.15); headGrp.add(br);
+    });
+    const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.01, 0.02), new THREE.MeshBasicMaterial({ color: 0x7a3b30 })); mouth.position.set(0, 0.03, 0.195); mouth.rotation.z = 0.08; headGrp.add(mouth);
+
+    [
+      { x: 0, n: 22, a0: 1.0, hs: 1, tiltZ: 0 },
+      { x: -0.03, n: 21, a0: 0.94, hs: 0.85, tiltZ: -0.11 },
+      { x: 0.03, n: 21, a0: 0.94, hs: 0.85, tiltZ: 0.11 }
+    ].forEach(({x, n, a0, hs, tiltZ}) => {
+      for (let i = 0; i < n; i++) {
+        const a = a0 - i * 0.115, h = (0.2 + 0.3 * Math.cos(a * 1.05)) * hs;
+        const k = Math.sqrt(1 - (Math.abs(x) / 0.184) * (Math.abs(x) / 0.184)) * 0.97;
+        const geo = new THREE.ConeGeometry(0.048, h, 6); geo.translate(0, h / 2, 0);
+        const sp = new THREE.Mesh(geo, green);
+        sp.position.set(x, 0.15 + Math.cos(a) * 0.216 * k, 0.01 + Math.sin(a) * 0.2 * k);
+        sp.rotation.z = tiltZ;
+        sp.userData.base = a * 0.85 + 0.1; sp.userData.i = i + x * 20;
+        headGrp.add(sp); spikes.push(sp);
+      }
+    });
+
+    [
+      { x: 0, n: 8, a0: -1.42, hs: 0.7, tiltZ: 0 },
+      { x: -0.025, n: 7, a0: -1.42, hs: 0.6, tiltZ: -0.08 },
+      { x: 0.025, n: 7, a0: -1.42, hs: 0.6, tiltZ: 0.08 }
+    ].forEach(({x, n, a0, hs, tiltZ}) => {
+      for (let i = 0; i < n; i++) {
+        const a = a0 - i * 0.12, h = (0.15 + 0.15 * Math.cos(a)) * hs;
+        const k = Math.sqrt(1 - (Math.abs(x) / 0.184) * (Math.abs(x) / 0.184)) * 0.97;
+        const geo = new THREE.ConeGeo
