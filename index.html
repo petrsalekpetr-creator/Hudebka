@@ -11,6 +11,10 @@
     box-sizing: border-box;
 }
 
+html {
+    scroll-behavior: smooth;
+}
+
 body {
     margin: 0;
     font-family: Arial, sans-serif;
@@ -18,7 +22,7 @@ body {
     color: #eee;
 }
 
-/* HLAVIČKA */
+/* ÚVOD */
 
 header {
     min-height: 90vh;
@@ -28,7 +32,7 @@ header {
     text-align: center;
 
     background:
-        linear-gradient(rgba(0,0,0,.65), rgba(0,0,0,.85)),
+        linear-gradient(rgba(0,0,0,.65), rgba(0,0,0,.9)),
         radial-gradient(circle at center, #633, #111 70%);
 }
 
@@ -102,7 +106,7 @@ h2 {
 }
 
 
-/* KARTY */
+/* HRY */
 
 .cards {
     display: grid;
@@ -115,7 +119,6 @@ h2 {
     border: 1px solid #333;
     border-radius: 16px;
     padding: 25px;
-
     transition: .2s;
 }
 
@@ -176,7 +179,7 @@ footer {
         <h1>HUDEBKA</h1>
 
         <p>
-            Hudba, hry a další blbosti.
+            Hry, projekty a další věci od naší party.
         </p>
 
         <a class="button" href="#hry">
@@ -190,7 +193,6 @@ footer {
 <nav>
     <a href="#hry">Hry</a>
     <a href="#novinky">Aktuality</a>
-    <a href="#galerie">Galerie</a>
 </nav>
 
 
@@ -201,50 +203,20 @@ footer {
     <div class="cards">
 
         <div class="card">
-            <div class="icon">🎸</div>
 
-            <h3>Guitar Hero</h3>
+            <div class="icon">🏃</div>
+
+            <h3>Pee Runner</h3>
 
             <p>
-                Zahraj si vlastní skladby
-                a trefuj tóny do rytmu.
+                Naše první hra.
+                Brzy si ji budeš moct zahrát přímo tady.
             </p>
 
             <a class="button" href="#">
                 Hrát
             </a>
-        </div>
 
-
-        <div class="card">
-            <div class="icon">🥁</div>
-
-            <h3>Bubeník</h3>
-
-            <p>
-                Jednoduchá rytmická hra
-                pro všechny, co mají rádi bordel.
-            </p>
-
-            <a class="button" href="#">
-                Hrát
-            </a>
-        </div>
-
-
-        <div class="card">
-            <div class="icon">🎤</div>
-
-            <h3>Karaoke</h3>
-
-            <p>
-                Zatím připravujeme.
-                Možná to radši ani nespouštět.
-            </p>
-
-            <a class="button" href="#">
-                Brzy
-            </a>
         </div>
 
     </div>
@@ -257,49 +229,16 @@ footer {
     <h2>📰 Aktuality</h2>
 
     <div class="news">
+
         <small>25. 9. 2026</small>
-        <h3>Hudebka právě vzniká</h3>
+
+        <h3>Hudebka je v plenkách</h3>
+
         <p>
-            Stavíme nový hudební web.
-            První hry už jsou na cestě.
+            Web právě vzniká a tohle je teprve začátek.
+            Postupně sem budeme přidávat naše hry
+            a další projekty.
         </p>
-    </div>
-
-    <div class="news">
-        <small>24. 9. 2026</small>
-        <h3>Připravujeme Guitar Hero</h3>
-        <p>
-            Vlastní skladby, vlastní noty
-            a vlastní bordel.
-        </p>
-    </div>
-
-</section>
-
-
-<section id="galerie">
-
-    <h2>📷 Galerie</h2>
-
-    <div class="cards">
-
-        <div class="card">
-            <div class="icon">🎸</div>
-            <h3>Naše muzika</h3>
-            <p>Fotky a další materiály.</p>
-        </div>
-
-        <div class="card">
-            <div class="icon">🎶</div>
-            <h3>Skladby</h3>
-            <p>Přehled našich songů.</p>
-        </div>
-
-        <div class="card">
-            <div class="icon">🤘</div>
-            <h3>Galerie</h3>
-            <p>Sem později přijdou skutečné obrázky.</p>
-        </div>
 
     </div>
 
